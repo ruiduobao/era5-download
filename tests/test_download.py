@@ -100,6 +100,7 @@ class TestDownloadEra5:
         assert out_path.exists()
 
     def test_download_default_output_name(self, era5_mod, tmp_dir, sample_stac_response):
+        out_path = tmp_dir / "era5_temperature_2m_2024-01_to_2024-01.nc"
         session = MagicMock()
         resp = MagicMock()
         resp.json.return_value = sample_stac_response
@@ -111,7 +112,7 @@ class TestDownloadEra5:
         with patch("era5_download.create_session", return_value=session), \
              patch.object(era5_mod, "xr", mock_xr), \
              patch.object(era5_mod, "_sign_url", return_value="url"):
-            era5_mod.download_era5("temperature_2m", "2024-01", quiet=True)
+            era5_mod.download_era5("temperature_2m", "2024-01", output=str(out_path), quiet=True)
             assert mock_xr.open_zarr.called
 
     def test_download_bbox_passed_to_sel(self, era5_mod, tmp_dir, sample_stac_response):

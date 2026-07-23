@@ -41,7 +41,7 @@ __version__ = "0.1.0"
 
 STAC_URL = "https://planetarycomputer.microsoft.com/api/stac/v1"
 COLLECTION = "era5-pds"
-USER_AGENT = f"era5-download/{__version__}"
+USER_AGENT = f"era5-download/{__version__} (+https://clawhub.ai/skills/era5-download)"
 
 ERA5_VARIABLES = {
     "temperature_2m": {
@@ -135,6 +135,7 @@ def create_session():
     """Create a requests session with retry and user-agent."""
     session = requests.Session()
     session.headers.update({"User-Agent": USER_AGENT})
+    session.trust_env = False
     adapter = requests.adapters.HTTPAdapter(max_retries=3)
     session.mount("https://", adapter)
     session.mount("http://", adapter)
