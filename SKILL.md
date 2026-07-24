@@ -115,3 +115,42 @@ pip install -r requirements.txt
 - No API keys or credentials stored or transmitted
 - HTTPS-only data source
 - Input validation on all parameters
+
+---
+
+## 中文说明
+
+从 Microsoft Planetary Computer 下载 ERA5 单层再分析数据，无需 API 密钥。
+
+### 快速开始
+
+```bash
+# 列出可用变量
+python era5-download.py variables
+
+# 搜索数据（era5-pds 当前覆盖 1979-01 至 2020-12）
+python era5-download.py search --variable temperature_2m --start-date 2020-06 --end-date 2020-08
+
+# 下载为 NetCDF
+python era5-download.py download --variable temperature_2m --start-date 2020-06 --end-date 2020-06
+
+# 按边界框裁剪
+python era5-download.py download -v precipitation -s 2020-06 -e 2020-06 --bbox -10 35 5 45 -o europe_rain.nc
+```
+
+### 可用变量
+
+| 变量 | 单位 | 说明 |
+|---|---|---|
+| temperature_2m | K | 2米气温（分析场） |
+| precipitation | m | 总降水量（1小时累积） |
+| wind_u_10m | m/s | 10米风场 U 分量 |
+| wind_v_10m | m/s | 10米风场 V 分量 |
+| dewpoint_2m | K | 2米露点温度 |
+| surface_pressure | Pa | 地表气压 |
+| sea_surface_temperature | K | 海表温度 |
+| solar_radiation | J m**-2 | 向下短波辐射（1小时累积） |
+
+### 数据源
+
+使用 Microsoft Planetary Computer STAC API（`era5-pds` 集合），数据格式为 Zarr，免费用于研究和商业用途，无需认证。
