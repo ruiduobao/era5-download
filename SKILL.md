@@ -1,15 +1,13 @@
 ---
-name: era5-download
-display_name: ERA5 Reanalysis Downloader
-version: 0.1.2
-author: rui.duobao
-license: MIT-0
-description: |
-  Download ERA5 single-level reanalysis data from Microsoft Planetary Computer.
+description: 'Download ERA5 single-level reanalysis data from Microsoft Planetary
+  Computer.
+
   No API key required. Supports temperature, precipitation, wind, pressure,
+
   and other climate variables.
-runtime: python>=3.8
-tags: [gis, remote-sensing, climate, era5, reanalysis, planetary-computer, earth-observation]
+
+  '
+name: era5-download
 ---
 
 # ERA5 Reanalysis Downloader
