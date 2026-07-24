@@ -1,7 +1,7 @@
 ---
 name: era5-download
 display_name: ERA5 Reanalysis Downloader
-version: 0.1.0
+version: 0.1.2
 author: rui.duobao
 license: MIT-0
 description: |
