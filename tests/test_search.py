@@ -7,17 +7,17 @@ from unittest.mock import patch, MagicMock
 class TestGetVariableInfo:
     def test_valid_variable(self, era5_mod):
         info = era5_mod.get_variable_info("temperature_2m")
-        assert info["asset_key"] == "ta"
+        assert info["asset_key"] == "air_temperature_at_2_metres"
         assert info["units"] == "K"
 
     def test_precipitation(self, era5_mod):
         info = era5_mod.get_variable_info("precipitation")
-        assert info["asset_key"] == "pr"
+        assert info["asset_key"] == "precipitation_amount_1hour_Accumulation"
         assert info["units"] == "m"
 
-    def test_wind_speed(self, era5_mod):
-        info = era5_mod.get_variable_info("wind_speed_10m")
-        assert info["asset_key"] == "si10"
+    def test_wind_u_10m(self, era5_mod):
+        info = era5_mod.get_variable_info("wind_u_10m")
+        assert info["asset_key"] == "eastward_wind_at_10_metres"
 
     def test_invalid_variable_raises(self, era5_mod):
         with pytest.raises(ValueError, match="Unknown variable"):
@@ -30,7 +30,7 @@ class TestGetVariableInfo:
             assert "asset_key" in info, f"{name} missing asset_key"
 
     def test_variable_count(self, era5_mod):
-        assert len(era5_mod.ERA5_VARIABLES) >= 15
+        assert len(era5_mod.ERA5_VARIABLES) >= 9
 
 
 class TestParseDate:

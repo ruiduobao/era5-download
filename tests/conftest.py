@@ -51,11 +51,11 @@ SAMPLE_STAC_RESPONSE = {
             "id": "era5_pds_2024-01_ta",
             "properties": {"datetime": "2024-01-01T00:00:00Z"},
             "assets": {
-                "ta": {
+                "air_temperature_at_2_metres": {
                     "href": "https://example.com/era5/2024/01/ta.zarr",
                     "type": "application/x-zarr",
                 },
-                "pr": {
+                "precipitation_amount_1hour_Accumulation": {
                     "href": "https://example.com/era5/2024/01/pr.zarr",
                     "type": "application/x-zarr",
                 },
@@ -65,7 +65,7 @@ SAMPLE_STAC_RESPONSE = {
             "id": "era5_pds_2024-02_ta",
             "properties": {"datetime": "2024-02-01T00:00:00Z"},
             "assets": {
-                "ta": {
+                "air_temperature_at_2_metres": {
                     "href": "https://example.com/era5/2024/02/ta.zarr",
                     "type": "application/x-zarr",
                 },
@@ -75,7 +75,7 @@ SAMPLE_STAC_RESPONSE = {
             "id": "era5_pds_2024-03_ta",
             "properties": {"datetime": "2024-03-01T00:00:00Z"},
             "assets": {
-                "ta": {
+                "air_temperature_at_2_metres": {
                     "href": "https://example.com/era5/2024/03/ta.zarr",
                     "type": "application/x-zarr",
                 },

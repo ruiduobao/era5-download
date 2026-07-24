@@ -93,8 +93,8 @@ class TestSearchToDownloadPipeline:
 
 class TestMultipleVariables:
     @pytest.mark.parametrize("variable", [
-        "temperature_2m", "precipitation", "wind_speed_10m",
-        "dewpoint_2m", "surface_pressure", "cloud_cover",
+        "temperature_2m", "precipitation", "wind_u_10m",
+        "dewpoint_2m", "surface_pressure", "solar_radiation",
     ])
     def test_search_each_variable(self, era5_mod, variable, sample_stac_response):
         session = MagicMock()

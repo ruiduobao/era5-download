@@ -426,15 +426,6 @@ def _parse_item_date(item_id, dt_prop):
         except (ValueError, AttributeError):
             pass
 
-    # era5-pds items have id like "era5-pds-2020-07-an" (dash-separated).
-    # Try a regex to pull the YYYY-MM segment first.
-    m = re.search(r"(\d{4})-(\d{2})", item_id)
-    if m:
-        try:
-            return datetime.strptime(f"{m.group(1)}-{m.group(2)}", "%Y-%m")
-        except ValueError:
-            pass
-
     for fmt in ("%Y-%m-%dT%H:%M:%S", "%Y-%m-%d", "%Y-%m", "%Y"):
         try:
             return datetime.strptime(item_id, fmt)
