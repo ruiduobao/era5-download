@@ -22,35 +22,31 @@ Download ERA5 single-level reanalysis data from Microsoft Planetary Computer (no
 # List available variables
 python era5-download.py variables
 
-# Search for data
-python era5-download.py search --variable temperature_2m --start-date 2024-01 --end-date 2024-06
+# Search for data (note: era5-pds STAC collection currently covers 1979-01 to 2020-12)
+python era5-download.py search --variable temperature_2m --start-date 2020-06 --end-date 2020-08
 
 # Download as NetCDF
-python era5-download.py download --variable temperature_2m --start-date 2024-01 --end-date 2024-03
+python era5-download.py download --variable temperature_2m --start-date 2020-06 --end-date 2020-06
 
 # Download with bounding box subset
-python era5-download.py download -v precipitation -s 2024-01 -e 2024-12 --bbox -10 35 5 45 -o europe_rain.nc
+python era5-download.py download -v precipitation -s 2020-06 -e 2020-06 --bbox -10 35 5 45 -o europe_rain.nc
 ```
 
 ## Available Variables
 
 | Variable | Units | Description |
 |---|---|---|
-| temperature_2m | K | Air temperature at 2m |
-| precipitation | m | Total precipitation |
-| wind_speed_10m | m/s | Wind speed at 10m |
+| temperature_2m | K | Air temperature at 2m (analysis) |
+| precipitation | m | Total precipitation (1-hour accumulation) |
 | wind_u_10m | m/s | U-component of wind at 10m |
 | wind_v_10m | m/s | V-component of wind at 10m |
+| wind_u_100m | m/s | U-component of wind at 100m |
+| wind_v_100m | m/s | V-component of wind at 100m |
 | dewpoint_2m | K | Dewpoint temperature at 2m |
 | surface_pressure | Pa | Surface pressure |
 | sea_level_pressure | Pa | Mean sea level pressure |
-| relative_humidity | % | Relative humidity at 2m |
-| soil_temperature | K | Soil temperature (0-7cm) |
-| snow_cover | % | Snow cover |
-| cloud_cover | % | Total cloud cover |
-| evaporation | m | Evaporation |
-| runoff | m | Total runoff |
-| soil_moisture | m3/m3 | Soil moisture (0-7cm) |
+| sea_surface_temperature | K | Sea surface temperature |
+| solar_radiation | J m**-2 | Surface solar radiation downwards (1-hour accumulation) |
 
 ## CLI Reference
 

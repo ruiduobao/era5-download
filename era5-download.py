@@ -14,6 +14,7 @@ Usage:
 import argparse
 import json
 import os
+import re
 import sys
 import tempfile
 import time
@@ -33,6 +34,12 @@ except ImportError:
     xr = None
 
 try:
+    import zarr  # noqa: F401  — required by xr.open_zarr
+    _HAVE_ZARR = True
+except ImportError:
+    _HAVE_ZARR = False
+
+try:
     import planetary_computer
 except ImportError:
     planetary_computer = None
@@ -45,79 +52,59 @@ USER_AGENT = f"era5-download/{__version__} (+https://clawhub.ai/skills/era5-down
 
 ERA5_VARIABLES = {
     "temperature_2m": {
-        "description": "Air temperature at 2 meters above surface",
+        "description": "Air temperature at 2 meters above surface (analysis)",
         "units": "K",
-        "asset_key": "ta",
+        "asset_key": "air_temperature_at_2_metres",
     },
     "precipitation": {
-        "description": "Total precipitation",
+        "description": "Total precipitation (forecast 1-hour accumulation)",
         "units": "m",
-        "asset_key": "pr",
-    },
-    "wind_speed_10m": {
-        "description": "Wind speed at 10 meters above surface",
-        "units": "m/s",
-        "asset_key": "si10",
+        "asset_key": "precipitation_amount_1hour_Accumulation",
     },
     "wind_u_10m": {
         "description": "U-component of wind at 10 meters",
         "units": "m/s",
-        "asset_key": "u10",
+        "asset_key": "eastward_wind_at_10_metres",
     },
     "wind_v_10m": {
         "description": "V-component of wind at 10 meters",
         "units": "m/s",
-        "asset_key": "v10",
+        "asset_key": "northward_wind_at_10_metres",
+    },
+    "wind_u_100m": {
+        "description": "U-component of wind at 100 meters",
+        "units": "m/s",
+        "asset_key": "eastward_wind_at_100_metres",
+    },
+    "wind_v_100m": {
+        "description": "V-component of wind at 100 meters",
+        "units": "m/s",
+        "asset_key": "northward_wind_at_100_metres",
     },
     "dewpoint_2m": {
         "description": "Dewpoint temperature at 2 meters",
         "units": "K",
-        "asset_key": "d2m",
+        "asset_key": "dew_point_temperature_at_2_metres",
     },
     "surface_pressure": {
         "description": "Surface pressure",
         "units": "Pa",
-        "asset_key": "sp",
+        "asset_key": "surface_air_pressure",
     },
     "sea_level_pressure": {
         "description": "Mean sea level pressure",
         "units": "Pa",
-        "asset_key": "msl",
+        "asset_key": "air_pressure_at_mean_sea_level",
     },
-    "relative_humidity": {
-        "description": "Relative humidity at 2 meters",
-        "units": "%",
-        "asset_key": "r",
-    },
-    "soil_temperature": {
-        "description": "Soil temperature at level 1 (0-7 cm)",
+    "sea_surface_temperature": {
+        "description": "Sea surface temperature",
         "units": "K",
-        "asset_key": "stl1",
+        "asset_key": "sea_surface_temperature",
     },
-    "snow_cover": {
-        "description": "Snow cover",
-        "units": "%",
-        "asset_key": "snowc",
-    },
-    "cloud_cover": {
-        "description": "Total cloud cover",
-        "units": "%",
-        "asset_key": "tcc",
-    },
-    "evaporation": {
-        "description": "Evaporation",
-        "units": "m",
-        "asset_key": "e",
-    },
-    "runoff": {
-        "description": "Total runoff",
-        "units": "m",
-        "asset_key": "ro",
-    },
-    "soil_moisture": {
-        "description": "Soil moisture at level 1 (0-7 cm)",
-        "units": "m3/m3",
-        "asset_key": "swvl1",
+    "solar_radiation": {
+        "description": "Surface solar radiation downwards (1-hour accumulation)",
+        "units": "J m**-2",
+        "asset_key": "integral_wrt_time_of_surface_direct_downwelling_shortwave_flux_in_air_1hour_Accumulation",
     },
 }
 
@@ -162,7 +149,18 @@ def search_era5(variable, start_date, end_date=None, limit=12):
 
     session = create_session()
     url = f"{STAC_URL}/collections/{COLLECTION}/items"
+    # Build STAC datetime range filter so the server only returns items
+    # within the requested window. Required for accurate YYYY-MM matching.
+    dt_range = None
+    if start_dt and end_dt:
+        from datetime import datetime as _dt
+        end_inclusive = _dt(end_dt.year, end_dt.month, 28)  # 28 covers all months safely
+        if end_dt.month == 12:
+            end_inclusive = _dt(end_dt.year, 12, 31)
+        dt_range = f"{start_dt.strftime('%Y-%m-%dT00:00:00Z')}/{end_inclusive.strftime('%Y-%m-%dT%H:%M:%SZ')}"
     params = {"limit": limit}
+    if dt_range:
+        params["datetime"] = dt_range
     resp = session.get(url, params=params, timeout=30)
     resp.raise_for_status()
     data = resp.json()
@@ -172,7 +170,20 @@ def search_era5(variable, start_date, end_date=None, limit=12):
         item_id = item.get("id", "")
         item_assets = item.get("assets", {})
 
-        if asset_key not in item_assets:
+        # Match the variable by asset key OR by asset title/href hints.
+        # The era5-pds collection sometimes has the variable in `air` etc.
+        matched_asset = None
+        if asset_key in item_assets:
+            matched_asset = asset_key
+        else:
+            for ak, av in item_assets.items():
+                title = (av.get("title") or "").lower()
+                desc = (av.get("description") or "").lower()
+                href = (av.get("href") or "").lower()
+                if variable.replace("_", " ") in title or variable in href or asset_key in href:
+                    matched_asset = ak
+                    break
+        if matched_asset is None:
             continue
 
         item_date = _parse_item_date(item_id, item.get("properties", {}).get("datetime"))
@@ -184,7 +195,7 @@ def search_era5(variable, start_date, end_date=None, limit=12):
         if end_dt and item_date > end_dt:
             continue
 
-        href = item_assets[asset_key].get("href", "")
+        href = item_assets[matched_asset].get("href", "")
         results.append({
             "id": item_id,
             "datetime": item_date.isoformat(),
@@ -225,7 +236,9 @@ def download_era5(
     end_dt = _parse_date(end_date) if end_date else start_dt
 
     if output is None:
-        output = f"era5_{variable}_{start_date}_to_{end_date or start_date}.nc"
+        sd_label = start_date if isinstance(start_date, str) else start_dt.strftime("%Y-%m")
+        ed_label = (end_date if isinstance(end_date, str) else end_dt.strftime("%Y-%m")) if end_date else sd_label
+        output = f"era5_{variable}_{sd_label}_to_{ed_label}.nc"
 
     output_path = Path(output)
     if skip_existing and output_path.exists():
@@ -273,7 +286,7 @@ def download_era5(
     if not quiet:
         print(f"Found {len(items_to_download)} item(s) to download.")
 
-    if xr is not None:
+    if xr is not None and _HAVE_ZARR:
         datasets = []
         total = len(items_to_download)
         for idx, item in enumerate(items_to_download, 1):
@@ -303,50 +316,86 @@ def download_era5(
         if not quiet:
             print(f"Writing NetCDF to {output_path}...")
 
-        combined.to_netcdf(part_path)
-        part_path.rename(output_path)
+        try:
+            combined.to_netcdf(part_path)
+            part_path.rename(output_path)
+            final_path = output_path
+        except Exception as nc_err:
+            # NetCDF engine (h5netcdf/scipy) missing. Try engine="scipy" or
+            # fall back to a copy of the first zarr (no NetCDF, requires zarr).
+            if part_path.exists():
+                part_path.unlink()
+            try:
+                combined.to_netcdf(part_path, engine="scipy")
+                part_path.rename(output_path)
+                final_path = output_path
+            except Exception as scipy_err:
+                raise RuntimeError(
+                    f"NetCDF write failed. Install h5netcdf (`pip install h5netcdf`) "
+                    f"or scipy (`pip install scipy`) and retry. "
+                    f"Original error: {nc_err}"
+                ) from scipy_err
 
         if not quiet:
-            print(f"Done: {output_path}")
+            print(f"Done: {final_path}")
 
         for ds in datasets:
             ds.close()
 
-        return str(output_path)
-
+        return str(final_path)
+    elif xr is not None and not _HAVE_ZARR:
+        # xarray installed but zarr missing — we cannot open the planetary-computer
+        # zarr stores at all. Print a helpful hint.
+        raise RuntimeError(
+            "era5-download needs the `zarr` package to open planetary-computer "
+            "zarr stores. Install it with: pip install zarr  "
+            "(then re-run the download)."
+        )
     else:
         if not quiet:
             print("xarray not installed. Downloading raw zarr data...")
 
-        item = items_to_download[0]
-        part_path = output_path.with_suffix(output_path.suffix + ".part")
+        _download_raw_zarr(session, items_to_download, output_path, quiet=quiet)
+        return str(output_path)
 
-        resp = session.get(item["href"], stream=True, timeout=60)
-        resp.raise_for_status()
 
-        try:
-            total = int(resp.headers.get("content-length", 0))
-        except (ValueError, TypeError):
-            total = 0
+def _download_raw_zarr(session, items_to_download, output_path, quiet=False):
+    """Download raw zarr stream for the first item to the given path.
 
-        downloaded = 0
-        block_size = 8192
+    Used as a fallback when xarray/NetCDF backends are unavailable.
+    """
+    item = items_to_download[0]
+    # abfs:// URLs need a Planetary Computer SAS token to be fetchable via
+    # plain HTTPS. Sign the URL first.
+    store_url = _sign_url(item["href"])
+    part_path = output_path.with_suffix(output_path.suffix + ".part")
 
-        with open(part_path, "wb") as f:
-            for chunk in resp.iter_content(block_size):
-                f.write(chunk)
-                downloaded += len(chunk)
-                if not quiet and total > 0:
-                    pct = downloaded * 100 // total
-                    bar = "=" * (pct // 2) + " " * (50 - pct // 2)
-                    print(f"\r  [{bar}] {pct}% ({downloaded}/{total})", end="", flush=True)
+    resp = session.get(store_url, stream=True, timeout=60)
+    resp.raise_for_status()
 
-        if not quiet:
-            print()
+    try:
+        total = int(resp.headers.get("content-length", 0))
+    except (ValueError, TypeError):
+        total = 0
 
-        part_path.rename(output_path)
-        if not quiet:
-            print(f"Done: {output_path}")
+    downloaded = 0
+    block_size = 8192
+
+    with open(part_path, "wb") as f:
+        for chunk in resp.iter_content(block_size):
+            f.write(chunk)
+            downloaded += len(chunk)
+            if not quiet and total > 0:
+                pct = downloaded * 100 // total
+                bar = "=" * (pct // 2) + " " * (50 - pct // 2)
+                print(f"\r  [{bar}] {pct}% ({downloaded}/{total})", end="", flush=True)
+
+    if not quiet:
+        print()
+
+    part_path.rename(output_path)
+    if not quiet:
+        print(f"Done: {output_path}")
         return str(output_path)
 
 
@@ -373,8 +422,17 @@ def _parse_item_date(item_id, dt_prop):
     """Extract datetime from STAC item id or properties."""
     if dt_prop:
         try:
-            return datetime.fromisoformat(dt_prop.replace("Z", "+00:00")).replace(tzinfo=None)
+            return datetime.fromisoformat(str(dt_prop).replace("Z", "+00:00")).replace(tzinfo=None)
         except (ValueError, AttributeError):
+            pass
+
+    # era5-pds items have id like "era5-pds-2020-07-an" (dash-separated).
+    # Try a regex to pull the YYYY-MM segment first.
+    m = re.search(r"(\d{4})-(\d{2})", item_id)
+    if m:
+        try:
+            return datetime.strptime(f"{m.group(1)}-{m.group(2)}", "%Y-%m")
+        except ValueError:
             pass
 
     for fmt in ("%Y-%m-%dT%H:%M:%S", "%Y-%m-%d", "%Y-%m", "%Y"):
@@ -383,13 +441,13 @@ def _parse_item_date(item_id, dt_prop):
         except ValueError:
             continue
 
-    parts = item_id.split("_")
-    for part in parts:
-        if len(part) >= 4 and part[:4].isdigit():
-            try:
-                return _parse_date(part[:7] if len(part) >= 7 else part[:4])
-            except ValueError:
-                continue
+    for sep in ("_", "-", "."):
+        for part in item_id.split(sep):
+            if len(part) >= 4 and part[:4].isdigit():
+                try:
+                    return _parse_date(part[:7] if len(part) >= 7 else part[:4])
+                except ValueError:
+                    continue
     return None
 
 
