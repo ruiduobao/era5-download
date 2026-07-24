@@ -1,4 +1,4 @@
-# ERA5 Reanalysis Downloader · ERA5 气象再分析下载器
+﻿# ERA5 Reanalysis Downloader · ERA5 气象再分析下载器
 
 > 通过 STAC 搜索和下载 **ERA5 气象再分析**数据。
 > 默认后端是 **Microsoft Planetary Computer**（公开数据，无需账号）。
@@ -11,6 +11,36 @@
 ERA5 是 ECMWF 发布的全球气象再分析数据集，覆盖 1940 年至今，
 包含温度、降水、风速、气压等数十种变量。大部分用户卡在"数据怎么下"
 这一步——CDS API 需要注册、配额、复杂的 API 调用。本 skill 简化了这个流程。
+
+
+## Installation
+
+### Cross-platform (skills.sh · 50+ AI agents)
+
+```bash
+npx skills add ruiduobao/era5-download -g
+```
+
+Works with: Claude Code, Cursor, Codex, GitHub Copilot, Windsurf, Gemini CLI, Cline, AMP, VS Code, Zed, OpenClaw, and more.
+
+### Claude Code (plugin marketplace)
+
+```bash
+/plugin marketplace add ruiduobao/claude-plugins
+/plugin install era5-download@ruiduobao-geo-skills
+```
+
+### ClawHub (OpenClaw)
+
+```bash
+clawhub install ruiduobao/era5-download
+```
+
+### Manual
+
+```bash
+git clone https://github.com/ruiduobao/era5-download.git
+```
 
 ## Quickstart / 快速开始
 
