@@ -1,13 +1,6 @@
 ---
-description: 'Download ERA5 single-level reanalysis data from Microsoft Planetary
-  Computer.
-
-  No API key required. Supports temperature, precipitation, wind, pressure,
-
-  and other climate variables.
-
-  '
 name: era5-download
+description: 'Download ERA5 single-level reanalysis data from Microsoft Planetary description: 'Download ERA5 single-level reanalysis data from Microsoft Planetary Computer.  No API key required. Supports temperature, precipitation, wind, pressure,  and other climate variables.  '
 ---
 
 # ERA5 Reanalysis Downloader
