@@ -214,8 +214,9 @@ def download_era5(
     bbox=None,
     skip_existing=False,
     quiet=False,
+    fmt=None,
 ):
-    """Download ERA5 data and save as NetCDF.
+    """Download ERA5 data and save in the requested format.
 
     Args:
         variable: ERA5 variable name.
@@ -225,6 +226,7 @@ def download_era5(
         bbox: Bounding box [west, south, east, north].
         skip_existing: Skip download if output file exists.
         quiet: Suppress progress output.
+        fmt: Output format — 'netcdf' (default), 'csv', or 'json'.
 
     Returns:
         Path to downloaded file.
@@ -235,10 +237,15 @@ def download_era5(
     start_dt = _parse_date(start_date)
     end_dt = _parse_date(end_date) if end_date else start_dt
 
+    fmt = (fmt or "netcdf").lower()
+    if fmt not in ("netcdf", "csv", "json"):
+        raise ValueError(f"Unknown --format: {fmt!r}. Choose from: netcdf, csv, json.")
+
     if output is None:
         sd_label = start_date if isinstance(start_date, str) else start_dt.strftime("%Y-%m")
         ed_label = (end_date if isinstance(end_date, str) else end_dt.strftime("%Y-%m")) if end_date else sd_label
-        output = f"era5_{variable}_{sd_label}_to_{ed_label}.nc"
+        ext = {"netcdf": ".nc", "csv": ".csv", "json": ".json"}[fmt]
+        output = f"era5_{variable}_{sd_label}_to_{ed_label}{ext}"
 
     output_path = Path(output)
     if skip_existing and output_path.exists():
@@ -342,6 +349,36 @@ def download_era5(
         for ds in datasets:
             ds.close()
 
+        # Non-NetCDF formats: emit alongside the .nc file or override the output path.
+        if fmt in ("csv", "json"):
+            ts = _centroid_point_timeseries(combined)
+            csv_path = Path(str(final_path)).with_suffix(".csv")
+            json_path = Path(str(final_path)).with_suffix(".json")
+            if fmt == "csv":
+                write_csv_timeseries(ts, str(csv_path))
+                if not quiet:
+                    print(f"  CSV summary: {csv_path}")
+                return str(csv_path)
+            else:
+                summary = {
+                    "skill": "era5-download",
+                    "version": __version__,
+                    "variable": variable,
+                    "asset_key": asset_key,
+                    "units": var_info.get("units"),
+                    "start_date": str(start_date),
+                    "end_date": str(end_date or start_date),
+                    "bbox": list(bbox) if bbox else None,
+                    "n_items": len(items_to_download),
+                    "n_timesteps": len(ts),
+                    "netcdf_path": str(final_path),
+                    "timeseries": ts,
+                }
+                write_json_summary(summary, str(json_path))
+                if not quiet:
+                    print(f"  JSON summary: {json_path}")
+                return str(json_path)
+
         return str(final_path)
     elif xr is not None and not _HAVE_ZARR:
         # xarray installed but zarr missing — we cannot open the planetary-computer
@@ -442,12 +479,130 @@ def _parse_item_date(item_id, dt_prop):
     return None
 
 
+def _centroid_point_timeseries(combined, var_name=None):
+    """Extract a centroid (lat/lon midpoint) time series from a combined xarray dataset.
+
+    Returns a list of dicts: [{"time": str, "value": float}, ...]
+    Falls back to spatial mean if the dataset lacks latitude/longitude dims.
+    """
+    import numpy as _np
+    if combined is None:
+        return []
+    # Pick the data variable — first non-coord data var
+    data_vars = [v for v in combined.data_vars if v not in ("time", "latitude", "longitude")]
+    if not data_vars:
+        return []
+    v = var_name if var_name in combined.data_vars else data_vars[0]
+    da = combined[v]
+
+    if "latitude" in da.dims and "longitude" in da.dims:
+        # Pick the middle of the spatial grid
+        lat_mid = da.sizes["latitude"] // 2
+        lon_mid = da.sizes["longitude"] // 2
+        ts = da.isel(latitude=lat_mid, longitude=lon_mid)
+    else:
+        ts = da.mean(dim=[d for d in da.dims if d != "time"], skipna=True)
+
+    ts = ts.load()
+    times = combined["time"].values if "time" in combined.coords else _np.arange(ts.sizes.get("time", len(ts)))
+    values = ts.values
+    out = []
+    for t, val in zip(times, values):
+        try:
+            t_str = str(t)[:19]
+        except Exception:
+            t_str = str(t)
+        try:
+            v = float(val)
+        except (TypeError, ValueError):
+            v = None
+        out.append({"time": t_str, "value": v})
+    return out
+
+
+def write_csv_timeseries(rows, output_path):
+    """Write a list of {time, value} dicts to CSV (one row per timestep)."""
+    import csv as _csv
+    with open(output_path, "w", newline="", encoding="utf-8") as f:
+        if not rows:
+            f.write("time,value\n")
+            return
+        writer = _csv.DictWriter(f, fieldnames=list(rows[0].keys()))
+        writer.writeheader()
+        writer.writerows(rows)
+
+
+def write_json_summary(summary, output_path):
+    """Write a structured JSON summary of the download."""
+    with open(output_path, "w", encoding="utf-8") as f:
+        json.dump(summary, f, indent=2, ensure_ascii=False, default=str)
+
+
 def list_variables():
     """List all available ERA5 variables."""
     print(f"{'Variable':<25} {'Units':<12} Description")
     print("-" * 75)
     for name, info in sorted(ERA5_VARIABLES.items()):
         print(f"{name:<25} {info['units']:<12} {info['description']}")
+
+
+# Common variables (a small subset of the most useful for a quick demo).
+ERA5_PRESETS = {
+    "temperature":   ["temperature_2m", "dewpoint_temperature_2m"],
+    "precipitation": ["total_precipitation"],
+    "wind":          ["wind_speed_10m", "wind_direction_10m"],
+    "radiation":     ["shortwave_radiation", "longwave_radiation"],
+    "pressure":      ["surface_pressure", "mean_sea_level_pressure"],
+}
+
+NOMINATIM_ENDPOINTS = [
+    "https://nominatim.openstreetmap.org",
+]
+
+
+def _nominatim_search(query: str, timeout: int = 30):
+    """Call Nominatim with endpoint fallback. Returns a list of candidates."""
+    import requests as _req
+    last_err = None
+    params = {"q": query, "format": "jsonv2", "limit": 1, "addressdetails": 1}
+    for endpoint in NOMINATIM_ENDPOINTS:
+        try:
+            r = _req.get(
+                f"{endpoint}/search", params=params,
+                headers={"User-Agent": "era5-download/0.2.0", "Accept-Language": "zh-CN,zh;q=0.9"},
+                timeout=timeout,
+            )
+            if r.status_code == 429 or r.status_code >= 500:
+                last_err = f"HTTP {r.status_code}"
+                continue
+            r.raise_for_status()
+            return r.json()
+        except (_req.exceptions.Timeout, _req.exceptions.ConnectionError) as e:
+            last_err = str(e)
+            continue
+    raise RuntimeError(f"All Nominatim endpoints failed for {query!r}: {last_err}")
+
+
+def resolve_place(place: str) -> dict:
+    """Resolve a place name to (lat, lon, bbox, display_name, osm_id)."""
+    import re
+    normalised = re.sub(r"\s+", "", place.strip())
+    if not normalised:
+        raise ValueError("--place must not be empty")
+    candidates = _nominatim_search(normalised)
+    if not candidates:
+        raise ValueError(f"No results for {place!r}")
+    c = candidates[0]
+    bb = c.get("boundingbox") or []
+    return {
+        "query": place,
+        "display_name": c.get("display_name"),
+        "lat": float(c["lat"]),
+        "lon": float(c["lon"]),
+        "bbox": [float(bb[2]), float(bb[0]), float(bb[3]), float(bb[1])] if len(bb) == 4 else None,
+        "osm_id": c.get("osm_id"),
+        "osm_type": c.get("osm_type"),
+    }
 
 
 def build_parser():
@@ -480,15 +635,37 @@ def build_parser():
     sp_dl.add_argument("--start-date", "-s", required=True, help="Start date (YYYY-MM)")
     sp_dl.add_argument("--end-date", "-e", default=None, help="End date (YYYY-MM)")
     sp_dl.add_argument("--output", "-o", default=None, help="Output file path")
-    sp_dl.add_argument("--bbox", nargs=4, type=float, metavar=("W", "S", "E", "N"),
-                        help="Bounding box: west south east north")
+    sp_dl.add_argument(
+        "--bbox", nargs=4, type=float, metavar=("W", "S", "E", "N"),
+        help="Bounding box: west south east north")
+    sp_dl.add_argument("--place", help="Place name (e.g. '北京市朝阳区'); resolved via Nominatim")
+    sp_dl.add_argument(
+        "--preset", choices=sorted(ERA5_PRESETS.keys()),
+        help="Use a variable preset (temperature/precipitation/wind/radiation/pressure)")
     sp_dl.add_argument("--skip-existing", action="store_true", help="Skip if output exists")
     sp_dl.add_argument("--quiet", "-q", action="store_true", help="Suppress progress output")
+    sp_dl.add_argument(
+        "--format", choices=["netcdf", "csv", "json"], default="netcdf",
+        help="Output format (default: netcdf). csv/json emit a centroid time-series alongside the netcdf file.",
+    )
+    sp_dl.add_argument("--qa", action="store_true",
+                       help="Write a QA summary JSON next to the output")
 
     # variables
     sub.add_parser("variables", help="List available ERA5 variables")
 
+    # presets
+    sp_preset = sub.add_parser("list-presets", help="List available variable presets")
+    sp_preset.set_defaults(func=lambda args: print_available_presets())
+
     return parser
+
+
+def print_available_presets():
+    print("ERA5 - Variable Presets")
+    print("=" * 60)
+    for name, vars_ in ERA5_PRESETS.items():
+        print(f"  {name}: {', '.join(vars_)}")
 
 
 def main(argv=None):
@@ -502,6 +679,10 @@ def main(argv=None):
 
     if args.command == "variables":
         list_variables()
+        return 0
+
+    if args.command == "list-presets":
+        print_available_presets()
         return 0
 
     if args.command == "search":
@@ -524,6 +705,27 @@ def main(argv=None):
             return 1
 
     if args.command == "download":
+        # Apply preset (overrides --variable when set)
+        if getattr(args, "preset", None):
+            preset_vars = ERA5_PRESETS[args.preset]
+            if not args.variable or args.variable == "temperature_2m":
+                # default placeholder; only override if user didn't specify
+                args.variable = preset_vars[0]
+            else:
+                print(f"NOTE: --preset {args.preset} ignored because --variable is explicit",
+                      file=sys.stderr)
+            print(f"Using preset {args.preset!r}: {preset_vars}")
+        # Resolve place → bbox
+        place_info = None
+        if getattr(args, "place", None):
+            try:
+                place_info = resolve_place(args.place)
+                args.bbox = tuple(place_info["bbox"])
+                print(f"Resolved {args.place!r} → {place_info['display_name']}")
+                print(f"  bbox: {args.bbox}  OSM {place_info['osm_type']}/{place_info['osm_id']}")
+            except (ValueError, RuntimeError) as e:
+                print(f"ERROR: could not resolve --place: {e}", file=sys.stderr)
+                return 1
         try:
             path = download_era5(
                 variable=args.variable,
@@ -533,8 +735,24 @@ def main(argv=None):
                 bbox=args.bbox,
                 skip_existing=args.skip_existing,
                 quiet=args.quiet,
+                fmt=getattr(args, "format", "netcdf"),
             )
             print(path)
+            if getattr(args, "qa", False) and path:
+                qa = {
+                    "skill": "era5-download",
+                    "version": __version__,
+                    "variable": args.variable,
+                    "preset": getattr(args, "preset", None),
+                    "place": place_info,
+                    "bbox": list(args.bbox) if args.bbox else None,
+                    "period": {"start": args.start_date, "end": args.end_date},
+                    "output": path,
+                }
+                qa_path = os.path.splitext(path)[0] + ".qa.json"
+                with open(qa_path, "w", encoding="utf-8") as f:
+                    json.dump(qa, f, ensure_ascii=False, indent=2)
+                print(f"QA: {qa_path}")
             return 0
         except Exception as e:
             print(f"Error: {e}", file=sys.stderr)
